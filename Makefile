@@ -1,4 +1,4 @@
-export PACKAGE_VERSION := 1.2
+export PACKAGE_VERSION := 1.2.1
 
 ARCHS := arm64 arm64e
 TARGET := iphone:clang:latest:15.0
@@ -21,11 +21,13 @@ UIStatusBarWidthAdjust_CFLAGS += -fobjc-arc
 UIStatusBarWidthAdjust_CFLAGS += -I.
 UIStatusBarWidthAdjust_CFLAGS += -IUISBWAPrefs
 UIStatusBarWidthAdjust_CFLAGS += -DPACKAGE_VERSION=\"$(PACKAGE_VERSION)\"
+UIStatusBarWidthAdjust_CFLAGS += -Wno-deprecated-declarations
 
 UIStatusBarWidthAdjust_CCFLAGS += -Wno-unused-variable
 UIStatusBarWidthAdjust_CCFLAGS += -Wno-unused-function
 
 UIStatusBarWidthAdjust_FRAMEWORKS += CoreGraphics
 UIStatusBarWidthAdjust_FRAMEWORKS += UIKit
+UIStatusBarWidthAdjust_FRAMEWORKS += Foundation
 
 include $(THEOS_MAKE_PATH)/tweak.mk

@@ -1,8 +1,8 @@
-Package: com.82flex.ohmyinsets
-Name: Oh My Insets
-Version: 1.2
-Architecture: iphoneos-arm
-Description: Customize columns of CC and paddings of the status bar.
+Package: com.sini.ohmyinsets
+Name: Oh My Insets (iOS 17 Safe)
+Version: 1.2.1
+Architecture: iphoneos-arm64
+Description: Customize columns of CC and paddings of the status bar. iOS 17 / roothide guarded build.
 Maintainer: Lessica <82flex@gmail.com>
 Author: Lessica <82flex@gmail.com>
 Section: Tweaks
