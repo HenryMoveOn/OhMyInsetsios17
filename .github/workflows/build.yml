@@ -1,127 +1,94 @@
-name: Build OhMyInsets
+name: Build OhMyInsets (roothide / iOS 17 safe)
 
 on:
   push:
-    branches: [ release ]
+    branches: [ main, release ]
   workflow_dispatch:
 
 env:
   FINALPACKAGE: 1
+  THEOS_PACKAGE_SCHEME: roothide
   HOMEBREW_NO_AUTO_UPDATE: 1
   HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: 1
 
 jobs:
   build:
     runs-on: macos-14
-    
-    strategy:
-      matrix:
-        scheme: ['', 'rootless', 'roothide']
-    
+
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
-    
-    - name: Install dependencies
-      run: |
-        # Install xcbeautify for build output formatting
-        # Install ldid for iOS code signing
-        # Install 7zip for compression
-        brew install xcbeautify ldid-procursus p7zip make
-        
-    - name: Checkout roothide/theos
-      uses: actions/checkout@v4
-      with:
-        repository: roothide/theos
-        path: theos-roothide
-        submodules: recursive
-        
-    - name: Install iOS SDKs
-      run: |
-        export THEOS=$GITHUB_WORKSPACE/theos-roothide
-        cd theos-roothide
-        ./bin/install-sdk iPhoneOS16.5
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        
+      uses: actions/checkout@v5
+
     - name: Setup Xcode
       uses: maxim-lobanov/setup-xcode@v1
       with:
         xcode-version: '16.2'
-        
-    - name: Build package (${{ matrix.scheme || 'default' }})
-      run: |
-        export THEOS=$GITHUB_WORKSPACE/theos-roothide
-        THEOS_PACKAGE_SCHEME=${{ matrix.scheme }} FINALPACKAGE=1 gmake clean package
-        
-    - name: Prepare artifacts
-      run: |
-        # Create directories for artifacts
-        mkdir -p artifacts/dsym-${{ matrix.scheme || 'default' }}
-        mkdir -p artifacts/packages-${{ matrix.scheme || 'default' }}
-        
-        # Copy dSYM files
-        if [ -d ".theos/obj" ]; then
-          find .theos/obj -name "*.dSYM" -exec cp -r {} artifacts/dsym-${{ matrix.scheme || 'default' }}/ \;
-        fi
-        
-        # Copy packages
-        if [ -d "packages" ]; then
-          cp -r packages/* artifacts/packages-${{ matrix.scheme || 'default' }}/
-        fi
-        
-    - name: Upload dSYM artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: dsym-${{ matrix.scheme || 'default' }}
-        path: artifacts/dsym-${{ matrix.scheme || 'default' }}
-        if-no-files-found: warn
-        
-    - name: Upload package artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: packages-${{ matrix.scheme || 'default' }}
-        path: artifacts/packages-${{ matrix.scheme || 'default' }}
-        if-no-files-found: warn
 
-  release:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/release'
-    needs: build
-    runs-on: macos-14
-    
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      
-    - name: Download all package artifacts
-      uses: actions/download-artifact@v4
-      with:
-        pattern: packages-*
-        path: release-packages
-        merge-multiple: true
-        
-    - name: Create release tag
-      id: tag
+    - name: Install build tools
       run: |
-        # Read PACKAGE_VERSION from Makefile
-        PACKAGE_VERSION=$(grep 'PACKAGE_VERSION' Makefile | cut -d' ' -f4)
-        TAG_NAME="v$PACKAGE_VERSION"
-        echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
-        
-    - name: Create GitHub Release
-      uses: softprops/action-gh-release@v1
+        brew install ldid-procursus make xz 2>/dev/null || true
+
+    # theos 必须放在 $GITHUB_WORKSPACE 下（runner 对 /opt 没有写权限）
+    - name: Checkout roothide/theos
+      uses: actions/checkout@v5
       with:
-        tag_name: ${{ steps.tag.outputs.tag_name }}
-        name: Release ${{ steps.tag.outputs.tag_name }}
-        body: |
-          Automated build from release branch
-          
-          This release contains packages built with:
-          - Default scheme
-          - Rootless scheme  
-          - Roothide scheme
-          
-          Built on: ${{ github.sha }}
-        files: release-packages/**/*
-        draft: false
-        prerelease: false
+        repository: roothide/theos
+        path: theos-roothide
+        submodules: recursive
+
+    - name: Install iOS SDK
+      run: |
+        export THEOS="$GITHUB_WORKSPACE/theos-roothide"
+        cd "$THEOS"
+        ./bin/install-sdk iPhoneOS16.5
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Build roothide package
+      id: build
+      run: |
+        export THEOS="$GITHUB_WORKSPACE/theos-roothide"
+        export THEOS_PACKAGE_SCHEME=roothide
+        gmake clean package FINALPACKAGE=1 2>&1 | tee build.log
+        test -n "$(find packages -name '*.deb' -print -quit)"
+
+    - name: Verify dylib dependencies (roothide install-name)
+      if: always()
+      run: |
+        DYLIB=$(find .theos -name 'UIStatusBarWidthAdjust.dylib' -print -quit 2>/dev/null || true)
+        if [ -n "$DYLIB" ]; then
+          otool -L "$DYLIB" | sed -n '2,40p' | while IFS= read -r line; do
+            echo "::warning title=dylib dep::$line"
+          done
+          if otool -L "$DYLIB" | grep -q 'CydiaSubstrate.framework'; then
+            echo "::error title=bad dylib dep::CydiaSubstrate.framework 仍被引用，roothide 上会静默不加载"
+          fi
+        else
+          echo "::warning title=dylib dep::未找到 .theos 下的 dylib"
+        fi
+
+    # 无鉴权读取编译错误：::error:: 会生成公开可读的 Annotation
+    - name: Surface compiler errors
+      if: always()
+      run: |
+        if [ -f build.log ]; then
+          grep -E "error:|fatal error:" build.log | head -40 | while IFS= read -r line; do
+            echo "::error title=compile error::$line"
+          done
+          echo "::notice title=build log tail::$(tail -n 20 build.log | tr '\n' ' ')"
+        fi
+
+    - name: Collect packages
+      if: always()
+      run: |
+        mkdir -p artifacts
+        find packages -name '*.deb' -exec cp {} artifacts/ \; 2>/dev/null || true
+        [ -f build.log ] && cp build.log artifacts/ || true
+        ls -la artifacts
+
+    - name: Upload deb
+      uses: actions/upload-artifact@v4
+      with:
+        name: ohmyinsets-roothide-ios17
+        path: artifacts/
+        if-no-files-found: warn
