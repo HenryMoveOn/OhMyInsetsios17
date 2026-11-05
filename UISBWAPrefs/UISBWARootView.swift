@@ -9,6 +9,13 @@ struct UISBWARootView: View {
     @AppStorage("isFiveColumnsEnabled", store: UISBWAUserDefaults.standard)
     var isFiveColumnsEnabled = false
 
+    // iOS 17 兼容性诊断：由 tweak 侧写入（SpringBoard），这里只负责显示
+    @AppStorage("omiStatus", store: UISBWAUserDefaults.standard)
+    var omiStatus = "等待 SpringBoard 写入诊断信息（请 respring 后重新打开本页）"
+
+    @AppStorage("omiMissing", store: UISBWAUserDefaults.standard)
+    var omiMissing = ""
+
     @AppStorage("compactLeadingInset", store: UISBWAUserDefaults.standard)
     var compactLeadingInset: Double = 0
     let minimumCompactLeadingInset: Double = 0
@@ -75,6 +82,25 @@ struct UISBWARootView: View {
             .toggleStyle(SwitchToggleStyle(tint: UISBWA_COLOR))
         } header: {
             Text(NSLocalizedString("General", bundle: Bundle.uisbwa_support, comment: ""))
+        }
+    }
+
+    // 兼容性诊断：ok = 该组 hook 已安装；no = 当前系统的私有类/方法不存在，已自动跳过（不会进安全模式）
+    var diagnosticSection: some View {
+        Section {
+            Text(omiStatus)
+                .font(.footnote.monospaced())
+                .textSelection(.enabled)
+            if !omiMissing.isEmpty {
+                Text(omiMissing)
+                    .font(.caption2.monospaced())
+                    .foregroundColor(.secondary)
+                    .textSelection(.enabled)
+            }
+        } header: {
+            Text("兼容性诊断 / iOS 17")
+        } footer: {
+            Text("ok 表示该功能组的 hook 已成功安装；no 表示当前系统缺少对应私有类或方法，已自动跳过以保护 SpringBoard。")
         }
     }
 
@@ -238,7 +264,7 @@ struct UISBWARootView: View {
             Button {
                 Bundle.uisbwa_openSensitiveURL(URL(string: "https://havoc.app/search/82Flex")!)
             } label: {
-                Text(NSLocalizedString("Made with ♥ by OwnGoal Studio", bundle: Bundle.uisbwa_support, comment: ""))
+                Text(NSLocalizedString("Made with ♥ by OwnGoal Studio", bundle: Bundle.uisbwa_support, comment: ""))
             }
         } footer: {
             Text(NSLocalizedString("Please support our paid works, thank you!", bundle: Bundle.uisbwa_support, comment: ""))
@@ -249,6 +275,7 @@ struct UISBWARootView: View {
         Form {
             header
             generalSection
+            diagnosticSection
             compactLeadingInsetSection
             compactTrailingInsetSection
             expandedLeadingInsetSection
